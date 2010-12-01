@@ -32,13 +32,15 @@ class Jailor(EIPCProcess):
     
     TASK_NAME_RE = re.compile('\w+\.\w+\.\w+')
 
-    def __init__(self, pipe, cores, debug = False):
+    def __init__(self, pipe, cores, basedir = 'pexecenv', debug = False):
         """
         Constructor.
         @type pipe: EIPC
-        @param address: The pipe used for IPC.
+        @param pipe: The pipe used for IPC.
         @type cores: int
         @param cores: The number of cores/cpu to utilize when scheduling.
+        @type basedir: str
+        @param basedir: The base directory where task code is stored. 
         """
         # Initialize super class.
         super(Jailor, self).__init__(pipe)
@@ -59,7 +61,7 @@ class Jailor(EIPCProcess):
         self.__logger = logging.getLogger('jailor')
 
         # Create the scheduler and registry.
-        self.registry = TaskRegistry()
+        self.registry = TaskRegistry(basedir)
         self.scheduler = Scheduler(self, cores)
 
         # Register functions for IPC.
@@ -69,17 +71,6 @@ class Jailor(EIPCProcess):
         self.register_function(self.fetch_task_code)
 
         self.__logger.info('Jailor initialized.')
-
-    @classmethod
-    def valid_task_name(cls, task_name):
-        """
-        Checks whether a task name is valid.
-        @type task_name: str
-        @param task_name: The task name to check for validity.
-        @rtype: bool
-        @return: Whether or not the task name adheres to the naming convention.
-        """
-        return cls.TASK_NAME_RE.match(task_name) != None
     
     def perform_task(self, task_name, task_input):
         """
@@ -90,12 +81,7 @@ class Jailor(EIPCProcess):
         @param task_input: The input for the given task.
         @rtype: int
         @return: The execution id of the scheduled task.
-        """
-        # Check the task name.
-        if not Jailor.valid_task_name(task_name):
-            self.__logger.info('Invalid task name %s used.'%task_name)
-            raise Exception('Invalid task name given.')
-        
+        """        
         # Check that the task exists.
         if not self.registry.has_task(task_name):
             self.__logger.info('Call to non-existing task %s'%task_name)
@@ -112,11 +98,6 @@ class Jailor(EIPCProcess):
         @type task_name: str
         @param task_name: The task identifier.
         """
-        # Check the task name.
-        if not Jailor.valid_task_name(task_name):
-            self.__logger.info('Invalid task name %s used.'%task_name)
-            raise Exception('Invalid task name given.')
-
         # Ask the registry whether or not the task is installed.
         return self.registry.has_task(task_name)
         
@@ -176,7 +157,7 @@ class Jailor(EIPCProcess):
         @raise Exception: Raised if the code fails to validate.  
         """
         # Check the validity of the task name.
-        if not Jailor.valid_task_name(task_name):
+        if not TaskRegistry.valid_task_name(task_name):
             self.__logger.info('task with invalid name given (%s)'%task_name)
             raise Exception('Invalid task name.')
         
@@ -215,11 +196,6 @@ class Jailor(EIPCProcess):
         @return: The task code as a string.
         @raise Exception: Raised if the task can not be found, or if the name is invalid.
         """
-        # Check the validity of the task name.
-        if not Jailor.valid_task_name(task_name):
-            self.__logger.info('task with invalid name given (%s)'%task_name)
-            raise Exception('Invalid task name.')
-        
         # Check that the task is in fact installed.
         if not self.registry.has_task(task_name):
             raise Exception('task %s is not installed.'%task_name)

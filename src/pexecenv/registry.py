@@ -18,12 +18,15 @@ This file contains the implementation of the task registry.
 """
 
 import os
+import re
 
 class TaskRegistry:
     """
     The task registry keeps track of installed tasks within the
     execution environment.
     """
+    
+    TASK_NAME_RE = re.compile('\w+\.\w+\.\w+')
 
     class NamingError(Exception):
         def __init__(self, message):
@@ -32,6 +35,17 @@ class TaskRegistry:
     class FileAccessError(Exception):
         def __init__(self, message, exception):
             super(TaskRegistry.FileAccessError, self).__init__(message, exception)
+    
+    @classmethod
+    def valid_task_name(cls, name):
+        """
+        Validates a given task name. 
+        @type name: str
+        @param name: The task name to validate.
+        @rtype: bool
+        @return: Whether or not name is a valid task name.
+        """
+        return cls.TASK_NAME_RE.match(name) != None
     
     def __init__(self, basedir):
         # Set member vars.
