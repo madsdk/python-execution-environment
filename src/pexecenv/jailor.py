@@ -22,7 +22,6 @@ from validator import Validator, ValidationError
 from monkey import monkey_header
 from eipc import EIPCProcess
 import logging
-import re
 
 class Jailor(EIPCProcess):
     """
@@ -30,8 +29,6 @@ class Jailor(EIPCProcess):
     and the outside world.
     """
     
-    TASK_NAME_RE = re.compile('\w+\.\w+\.\w+')
-
     def __init__(self, pipe, cores, basedir = 'pexecenv', debug = False):
         """
         Constructor.
