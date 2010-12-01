@@ -11,31 +11,34 @@ class CoreScheduler(Process):
     SLEEP_TIME = 0.01
     MAX_SINS = 1000
     
-    def __init__(self, eipc_handle):
+    def __init__(self, eipc_handle, basedir):
         """
         Constructor.
         @type eipc_handle: eipc.EIPC
         @param eipc_handle: An IPC handle that the corescheduler may use to communicate
         with the scheduler.
+        @type basedir: str
+        @param basedir: The base directory where task code is stored.
         """
         super(CoreScheduler, self).__init__()
         self.__ipc = eipc_handle
+        self._basedir = basedir
         self.__ipc.register_function(self.schedule)
         self.__ipc.start()
         self.__scheduling_queue = Queue()
         self.__sinners = {} # Sinners are tasklets that use too many resources :-)
 
-    def perform_service(self, service_name, service_input, execid):
+    def perform_task(self, task_name, task_input, execid):
         try:
-            # Load the service if necessary.
-            service_module = __import__('see.services.'+service_name, {}, {}, ['perform'], 0)
-            # Perform the service.
-            if type(service_input) == dict:
-                output = service_module.perform(**service_input)
-            elif type(service_input) in (tuple, list):
-                output = service_module.perform(*service_input)
+            # Load the task if necessary.
+            task_module = __import__(self._basedir + '.tasks.' + task_name, {}, {}, ['perform'], 0)
+            # Perform the task.
+            if type(task_input) == dict:
+                output = task_module.perform(**task_input)
+            elif type(task_input) in (tuple, list):
+                output = task_module.perform(*task_input)
             else:
-                output = service_module.perform(service_input)
+                output = task_module.perform(task_input)
         except TaskletExit:
             # The tasklet has been killed.
             try:
@@ -44,16 +47,16 @@ class CoreScheduler(Process):
                 if t in self.__sinners: 
                     self.__sinners.pop(t)
                 try:
-                    self.__ipc.callback(execid, 'ERROR', {'error':'Service was killed.'})
+                    self.__ipc.callback(execid, 'ERROR', {'error':'task was killed.'})
                 finally:
                     t.set_atomic(atomic)
-                    try: del service_module 
+                    try: del task_module 
                     except: pass
             except: #IGNORE:W0704
                 pass
             return
         except Exception, excep: #IGNORE:W0703
-            # The service execution has thrown an exception. Pass this
+            # The task execution has thrown an exception. Pass this
             # exception on to the initiator so that the bug hunt may begin. 
             try:
                 t = stackless.getcurrent()
@@ -64,13 +67,13 @@ class CoreScheduler(Process):
                     self.__ipc.callback(execid, 'ERROR', {'error':excep.message})
                 finally:
                     t.set_atomic(atomic)
-                    try: del service_module 
+                    try: del task_module 
                     except: pass
             except: #IGNORE:W0704
                 pass
             return
         
-        # The service has been successfully performed.
+        # The task has been successfully performed.
         try:
             t = stackless.getcurrent()
             if t in self.__sinners: 
@@ -80,7 +83,7 @@ class CoreScheduler(Process):
                 self.__ipc.callback(execid, 'DONE', {'output':output})
             finally:
                 t.set_atomic(atomic)
-                try: del service_module 
+                try: del task_module 
                 except: pass
         except: #IGNORE:W0704
             pass
@@ -88,17 +91,17 @@ class CoreScheduler(Process):
     def kill_tasklet(self, tasklet):
         tasklet.kill()
                       
-    def schedule(self, service_module, service_input, execid):
-        self.__scheduling_queue.put((service_module, service_input, execid))
+    def schedule(self, task_module, task_input, execid):
+        self.__scheduling_queue.put((task_module, task_input, execid))
           
     def run(self):
         """Main process function."""
         while True:
-            # Check whether any new services should be scheduled.
+            # Check whether any new tasks should be scheduled.
             while not self.__scheduling_queue.empty():
                 try:
-                    service_module, service_input, execid = self.__scheduling_queue.get_nowait()
-                    stackless.tasklet(self.perform_service)(service_module, service_input, execid)
+                    task_module, task_input, execid = self.__scheduling_queue.get_nowait()
+                    stackless.tasklet(self.perform_task)(task_module, task_input, execid)
                 except QueueEmptyException:
                     break
                                 
