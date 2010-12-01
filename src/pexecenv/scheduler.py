@@ -22,7 +22,7 @@ utilized.
 
 from __future__ import with_statement
 from corescheduler import CoreScheduler
-from eipc import eipc_pair
+from eipc import EIPC
 import logging
 
 class SchedulerException(Exception):
@@ -34,7 +34,7 @@ class Scheduler(object):
     """
     The master scheduler.
     This class creates a number of processes, where stackless tasklets may be
-    executed, and schedules between them when new services arrive.
+    executed, and schedules between them when new tasks arrive.
     """
     
     PIPE_CHECK_INTERVAL = 0.01
@@ -61,7 +61,7 @@ class Scheduler(object):
         # Spawn a thread for each core/cpu.
         self.__schedulers = []
         for i in range(0, cores):
-            local_ipc, remote_ipc = eipc_pair()
+            local_ipc, remote_ipc = EIPC.eipc_pair()
             self.__schedulers.append((CoreScheduler(remote_ipc), local_ipc))
             local_ipc.register_function(self.corescheduler_callback, "callback")
             local_ipc.start()
@@ -81,17 +81,17 @@ class Scheduler(object):
         for scheduler, _ in self.__schedulers:
             scheduler.terminate()
     
-    def schedule(self, service_name, service_input):
+    def schedule(self, task_name, task_input):
         """
-        Add the given service to the scheduler.
-        This means that the service will be performed a.s.a.p. on one of the
+        Add the given task to the scheduler.
+        This means that the task will be performed a.s.a.p. on one of the
         available CoreSchedulers.
-        @type service_name: str
-        @param service_name: The id of the service that is to be performed.
-        @type service_input: dict
-        @param service_input: The service input.
+        @type task_name: str
+        @param task_name: The id of the task that is to be performed.
+        @type task_input: dict
+        @param task_input: The task input.
         @rtype: int
-        @return: The id of the service execution.
+        @return: The id of the task execution.
         """
         # Register the execution with one of the core schedulers.
         execid = self.__execution_id
@@ -99,11 +99,11 @@ class Scheduler(object):
         core_scheduler = self.__next_scheduler
         self.__next_scheduler += 1
         self.__next_scheduler %= self.__cores
-        self.__schedulers[core_scheduler][1].schedule(service_name, service_input, execid)
+        self.__schedulers[core_scheduler][1].schedule(task_name, task_input, execid)
 
         # Return the execution id to the client.
         return execid
     
     def corescheduler_callback(self, execid, rcode, opt):
-        self.__jailor.service_callback(execid, rcode, opt)
+        self.__jailor.task_callback(execid, rcode, opt)
                     
