@@ -33,7 +33,7 @@ class TaskRegistry:
         def __init__(self, message, exception):
             super(TaskRegistry.FileAccessError, self).__init__(message, exception)
     
-    def __init__(self, basedir = 'pexecenv'):
+    def __init__(self, basedir):
         # Set member vars.
         self.__tasks = set()
         self._basedir = basedir
@@ -44,6 +44,8 @@ class TaskRegistry:
         if not os.path.exists(tasks_dir):
             try:
                 os.mkdir(tasks_dir, 0755)
+                with open(tasks_dir + os.path.sep + '__init__.py', 'w') as _:
+                    pass
             except Exception, e:
                 # TODO: add logging
                 raise TaskRegistry.FileAccessError('Error creating directory "tasks" for storing task code.', e)
@@ -84,11 +86,11 @@ class TaskRegistry:
         """
         # Start by creating the file and directories.
         (dir1, dir2, name) = task_name.split('.')
-        dir1_path = 'see' + os.path.sep + 'tasks' + os.path.sep + dir1
+        dir1_path = self._basedir + os.path.sep + 'tasks' + os.path.sep + dir1
         if not os.path.exists(dir1_path):
             os.mkdir(dir1_path)
             open(dir1_path + os.path.sep + '__init__.py', 'w').close()
-        dir2_path = 'see' + os.path.sep + 'tasks' + os.path.sep + dir1 + os.path.sep + dir2
+        dir2_path = self._basedir + os.path.sep + 'tasks' + os.path.sep + dir1 + os.path.sep + dir2
         if not os.path.exists(dir2_path):
             os.mkdir(dir2_path)
             open(dir2_path + os.path.sep + '__init__.py', 'w').close()
@@ -112,7 +114,7 @@ class TaskRegistry:
         @return: The code of the task.
         """
         # Read the task code into memory.
-        path = 'see' + os.path.sep + 'tasks' + os.path.sep + task_name.replace('.', os.path.sep) + '.py'
+        path = self._basedir + os.path.sep + 'tasks' + os.path.sep + task_name.replace('.', os.path.sep) + '.py'
         infile = open(path)
         code = infile.read()
         infile.close()
