@@ -14,10 +14,10 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """The jailor is responsible for managing the jail. He takes orders from 
-the outside and relays them to the prisoners within the jail (the services)."""
+the outside and relays them to the prisoners within the jail (the tasks)."""
 
 from scheduler import Scheduler
-from registry import ServiceRegistry
+from registry import TaskRegistry
 from validator import Validator, ValidationError
 from monkey import monkey_header
 from eipc import EIPCProcess
@@ -59,78 +59,78 @@ class Jailor(EIPCProcess):
         self.__logger = logging.getLogger('jailor')
 
         # Create the scheduler and registry.
-        self.registry = ServiceRegistry()
+        self.registry = TaskRegistry()
         self.scheduler = Scheduler(self, cores)
 
         # Register functions for IPC.
-        self.register_function(self.perform_service)
-        self.register_function(self.service_exists)
-        self.register_function(self.install_service)
-        self.register_function(self.fetch_service_code)
+        self.register_function(self.perform_task)
+        self.register_function(self.task_exists)
+        self.register_function(self.install_task)
+        self.register_function(self.fetch_task_code)
 
         self.__logger.info('Jailor initialized.')
 
     @classmethod
     def valid_task_name(cls, task_name):
         """
-        Checks whether a service name is valid.
+        Checks whether a task name is valid.
         @type task_name: str
-        @param task_name: The service name to check for validity.
+        @param task_name: The task name to check for validity.
         @rtype: bool
-        @return: Whether or not the service name adheres to the naming convention.
+        @return: Whether or not the task name adheres to the naming convention.
         """
         return cls.TASK_NAME_RE.match(task_name) != None
     
-    def perform_service(self, task_name, task_input):
+    def perform_task(self, task_name, task_input):
         """
-        Starts performing a named service on behalf of the client.
+        Starts performing a named task on behalf of the client.
         @type task_name: str
-        @param task_name: The service identifier.
+        @param task_name: The task identifier.
         @type task_input: dict (kwargs), tuple (pos args), or any (single argument).
         @param task_input: The input for the given task.
         @rtype: int
         @return: The execution id of the scheduled task.
         """
-        # Check the service name.
+        # Check the task name.
         if not Jailor.valid_task_name(task_name):
-            self.__logger.info('Invalid service name %s used.'%task_name)
-            raise Exception('Invalid service name given.')
+            self.__logger.info('Invalid task name %s used.'%task_name)
+            raise Exception('Invalid task name given.')
         
-        # Check that the service exists.
-        if not self.registry.has_service(task_name):
-            self.__logger.info('Call to non-existing service %s'%task_name)
-            raise Exception('The named service does not exist.')
+        # Check that the task exists.
+        if not self.registry.has_task(task_name):
+            self.__logger.info('Call to non-existing task %s'%task_name)
+            raise Exception('The named task does not exist.')
         
-        # Now start performing the service.
+        # Now start performing the task.
         execid = self.scheduler.schedule(task_name, task_input)
         self.__logger.info('%s scheduled with execid=%i.'%(task_name, execid))
         return execid
     
-    def service_exists(self, service_name):
+    def task_exists(self, task_name):
         """
-        Checks whether a given service exists.
-        @type service_name: str
-        @param service_name: The service identifier.
+        Checks whether a given task exists.
+        @type task_name: str
+        @param task_name: The task identifier.
         """
-        # Check the service name.
-        if not Jailor.valid_service_name(service_name):
-            self.__logger.info('Invalid service name %s used.'%service_name)
-            raise Exception('Invalid service name given.')
+        # Check the task name.
+        if not Jailor.valid_task_name(task_name):
+            self.__logger.info('Invalid task name %s used.'%task_name)
+            raise Exception('Invalid task name given.')
 
-        # Ask the registry whether or not the service is installed.
-        return self.registry.has_service(service_name)
+        # Ask the registry whether or not the task is installed.
+        return self.registry.has_task(task_name)
         
-    def service_callback(self, execution_id, status, args):
+    def task_callback(self, execution_id, status, args):
         """
-        Entry point for service callbacks. This is called by services 
+        Entry point for task callbacks. This is called by tasks 
         upon completion or when an error occurs.
         @type execution_id: int
-        @param execution_id: The id of the service execution. This is used on 
-        the client side to identify the responding service.
+        @param execution_id: The id of the task execution. This is used on 
+        the client side to identify the responding task.
         @type status: str
-        @param status: The status of the execution. This is: 'DONE' if the service 
+        @param status: The status of the execution. This is: 'DONE' if the task 
         has finished its execution, 'ERROR' if an error has occurred, and 'STATUS' if 
-        the service is simply returning some status information about its execution.
+        the task is simply returning some status information about its execution.
         @type args: dict
         @param args: Keyword-based arguments. Depending on the value of the 
         status parameter different keyword arguments are expected. 
@@ -142,56 +142,56 @@ class Jailor(EIPCProcess):
         try:
             # Switch out based on status.
             if status == 'DONE':
-                # The service has finished its execution. Return its output to 
+                # The task has finished its execution. Return its output to 
                 # the client.
                 try:
-                    self._ipc.service_callback('RESULT', execution_id, args['output'])
+                    self._ipc.task_callback('RESULT', execution_id, args['output'])
                 except Exception, excep:
                     self.__logger.exception('Error returning result.')
-                    self._ipc.service_callback('ERROR', execution_id, 'Error returning result: %s'%excep.message)
+                    self._ipc.task_callback('ERROR', execution_id, 'Error returning result: %s'%excep.message)
             elif status == 'ERROR':
-                # The service has encountered an error. Return the 
+                # The task has encountered an error. Return the 
                 # error message to the client.
-                self._ipc.service_callback('ERROR', execution_id, args['error'])
+                self._ipc.task_callback('ERROR', execution_id, args['error'])
             elif status == 'STATUS':
-                # The service is relaying status information about its
+                # The task is relaying status information about its
                 # execution.
-                self._ipc.service_callback('STATUS', execution_id, args['message'])
+                self._ipc.task_callback('STATUS', execution_id, args['message'])
             else:
                 # Unknown status - this should not happen.
                 raise ValueError('Unknown status (%s)'%status)
         except Exception:
             self.__logger.exception('Callback error encountered.')
                 
-    def install_service(self, service_name, service_code):
+    def install_task(self, task_name, task_code):
         """
-        Installs new service code in the execution environment.
-        @type service_name: str
-        @param service_name: The name of the service. This name must be on 
+        Installs new task code in the execution environment.
+        @type task_name: str
+        @param task_name: The name of the task. This name must be on 
         the form name1.name2.name3, e.g., daimi.imaging.scale
-        @type service_code: str
-        @param service_code: The code of the service. The code will be validated
+        @type task_code: str
+        @param task_code: The code of the task. The code will be validated
         by the Locusts code validator and thus must adhere to a lot of different 
         rules.
         @raise Exception: Raised if the code fails to validate.  
         """
-        # Check the validity of the service name.
-        if not Jailor.valid_service_name(service_name):
-            self.__logger.info('Service with invalid name given (%s)'%service_name)
-            raise Exception('Invalid service name.')
+        # Check the validity of the task name.
+        if not Jailor.valid_task_name(task_name):
+            self.__logger.info('task with invalid name given (%s)'%task_name)
+            raise Exception('Invalid task name.')
         
-        # Check that the service is not already installed.
-        if self.registry.has_service(service_name):
-            self.__logger.info('Attempt to re-install service.')
-            raise Exception('Service %s already installed.'%service_name)
+        # Check that the task is not already installed.
+        if self.registry.has_task(task_name):
+            self.__logger.info('Attempt to re-install task.')
+            raise Exception('task %s already installed.'%task_name)
         
         # Avoid malicious attempts to push __init__.py this way...
-        if service_name[-8:] == '__init__':
+        if task_name[-8:] == '__init__':
             self.__logger.info('Attempt to hack by pushing __init__.py')
             raise Exception('Stop trying to hack me!')
         
         # Validate the code.
-        v = Validator(service_code)
+        v = Validator(task_code)
         try:
             v.validate()
         except ValidationError, error:
@@ -200,32 +200,32 @@ class Jailor(EIPCProcess):
         
         # Install the code via the registry.
         try:
-            self.registry.install_service(service_name, monkey_header+service_code)
-            self.__logger.info('Installed service %s'%service_name)
+            self.registry.install_task(task_name, monkey_header+task_code)
+            self.__logger.info('Installed task %s'%task_name)
         except Exception, error:
-            self.__logger.exception('Error installing valid service code.')
-            raise Exception('Error writing service code onto disk. msg=%s'%error.message)
+            self.__logger.exception('Error installing valid task code.')
+            raise Exception('Error writing task code onto disk. msg=%s'%error.message)
     
-    def fetch_service_code(self, service_name):
+    def fetch_task_code(self, task_name):
         """
-        Fetches the code of a given service.
-        @type service_name: str
-        @param service_name: The name of the service.
+        Fetches the code of a given task.
+        @type task_name: str
+        @param task_name: The name of the task.
         @rtype: str
-        @return: The service code as a string.
-        @raise Exception: Raised if the service can not be found, or if the name is invalid.
+        @return: The task code as a string.
+        @raise Exception: Raised if the task can not be found, or if the name is invalid.
         """
-        # Check the validity of the service name.
-        if not Jailor.valid_service_name(service_name):
-            self.__logger.info('Service with invalid name given (%s)'%service_name)
-            raise Exception('Invalid service name.')
+        # Check the validity of the task name.
+        if not Jailor.valid_task_name(task_name):
+            self.__logger.info('task with invalid name given (%s)'%task_name)
+            raise Exception('Invalid task name.')
         
-        # Check that the service is in fact installed.
-        if not self.registry.has_service(service_name):
-            raise Exception('Service %s is not installed.'%service_name)
+        # Check that the task is in fact installed.
+        if not self.registry.has_task(task_name):
+            raise Exception('task %s is not installed.'%task_name)
         
         # Fetch the code.
-        return self.registry.fetch_service_code(service_name)
+        return self.registry.fetch_task_code(task_name)
         
     def shutdown(self):
         self.scheduler.stop()

@@ -3,6 +3,7 @@
 	<name>Python Execution Environment</name>
 	<comment></comment>
 	<projects>
+		<project>Python Easy IPC</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

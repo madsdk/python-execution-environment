@@ -14,22 +14,42 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-This file contains the implementation of the service registry.
+This file contains the implementation of the task registry.
 """
 
 import os
 
-class ServiceRegistry:
+class TaskRegistry:
     """
-    The service registry keeps track of installed services within the
+    The task registry keeps track of installed tasks within the
     execution environment.
     """
-    def __init__(self):
-        # Set member vars.
-        self.__services = set()
 
-        # Build the service registry by scanning the 'services' directory.
-        for root, _, files in os.walk('see' + os.path.sep + 'services'):
+    class NamingError(Exception):
+        def __init__(self, message):
+            super(TaskRegistry.NamingError, self).__init__(message)
+    
+    class FileAccessError(Exception):
+        def __init__(self, message, exception):
+            super(TaskRegistry.FileAccessError, self).__init__(message, exception)
+    
+    def __init__(self, basedir = 'pexecenv'):
+        # Set member vars.
+        self.__tasks = set()
+        self._basedir = basedir
+
+        # Build the task registry by scanning the 'tasks' directory.
+        # Start by checking that the 'tasks' directory exists.
+        tasks_dir = self._basedir + os.path.sep + 'tasks'
+        if not os.path.exists(tasks_dir):
+            try:
+                os.mkdir(tasks_dir, 0755)
+            except Exception, e:
+                # TODO: add logging
+                raise TaskRegistry.FileAccessError('Error creating directory "tasks" for storing task code.', e)
+        
+        # Walk the directory structure and insert available tasks into the registry.
+        for root, _, files in os.walk(tasks_dir):
             # Remove svn-entries and entries in an incorrect depth.
             if '.svn' in root or root.count(os.path.sep) != 3:
                 continue
@@ -38,59 +58,61 @@ class ServiceRegistry:
                 if filename[-3:] != '.py' or filename == '__init__.py':
                     continue
                 # Add the rest.
-                self.__services.add(root[13:].replace(os.path.sep,'.') + '.' + filename[:-3])
+                self.__tasks.add(root[len(tasks_dir)+1:].replace(os.path.sep,'.') + '.' + filename[:-3])
             
-    def has_service(self, service_name):
+    def has_task(self, task_name):
         """
-        Checks whether a given service is available.
-        @type service_name: str
-        @param service_name: The service identifier.
+        Checks whether a given task is available.
+        @type task_name: str
+        @param task_name: The task identifier.
+        @rtype: bool
+        @return: Whether or not the task in question is available.
         """
-        return service_name in self.__services
+        return task_name in self.__tasks
     
-    def install_service(self, service_name, service_code):
+    def install_task(self, task_name, task_code):
         """
-        Installs the given service. At this point we know that:
-        1) The service is not already installed.
-        2) The service code has been validated and found to be "safe".
-        3) The service name is valid.
-        @type service_name: str
-        @param service_name: The service identifier.
-        @type service_code: str
-        @param service_code: The service code, i.e., the Python code that 
-        performs the actual service.
+        Installs the given task. At this point we know that:
+        1) The task is not already installed.
+        2) The task code has been validated and found to be "safe".
+        3) The task name is valid.
+        @type task_name: str
+        @param task_name: The task identifier.
+        @type task_code: str
+        @param task_code: The task code, i.e., the Python code that 
+        performs the actual task.
         """
         # Start by creating the file and directories.
-        (dir1, dir2, name) = service_name.split('.')
-        dir1_path = 'see' + os.path.sep + 'services' + os.path.sep + dir1
+        (dir1, dir2, name) = task_name.split('.')
+        dir1_path = 'see' + os.path.sep + 'tasks' + os.path.sep + dir1
         if not os.path.exists(dir1_path):
             os.mkdir(dir1_path)
             open(dir1_path + os.path.sep + '__init__.py', 'w').close()
-        dir2_path = 'see' + os.path.sep + 'services' + os.path.sep + dir1 + os.path.sep + dir2
+        dir2_path = 'see' + os.path.sep + 'tasks' + os.path.sep + dir1 + os.path.sep + dir2
         if not os.path.exists(dir2_path):
             os.mkdir(dir2_path)
             open(dir2_path + os.path.sep + '__init__.py', 'w').close()
             
         # Now the path exists. Create the file and write the code into it.
         target_file = open(dir2_path + os.path.sep + '%s.py'%name, 'w')
-        target_file.write(service_code)
+        target_file.write(task_code)
         target_file.close()
         
-        # Add the service to the registry.
-        self.__services.add(service_name)
+        # Add the task to the registry.
+        self.__tasks.add(task_name)
         
-    def fetch_service_code(self, service_name):
+    def fetch_task_code(self, task_name):
         """
-        Fetches the source code of the named service. It is assumed that 
-        1) the service name is valid, and
-        2) the service is indeed installed. 
-        @type service_name: str
-        @param service_name: The name of the service.
+        Fetches the source code of the named task. It is assumed that 
+        1) the task name is valid, and
+        2) the task is indeed installed. 
+        @type task_name: str
+        @param task_name: The name of the task.
         @rtype: str
-        @return: The code of the service.
+        @return: The code of the task.
         """
-        # Read the service code into memory.
-        path = 'see' + os.path.sep + 'services' + os.path.sep + service_name.replace('.', os.path.sep) + '.py'
+        # Read the task code into memory.
+        path = 'see' + os.path.sep + 'tasks' + os.path.sep + task_name.replace('.', os.path.sep) + '.py'
         infile = open(path)
         code = infile.read()
         infile.close()
