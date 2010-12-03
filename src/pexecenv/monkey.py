@@ -14,7 +14,7 @@ def monkey_open(name, mode = 'r', buffering = -1):
    
 # The standard header that can be prefixed onto untrusted service code.
 monkey_header = """# ---MONKEY_START---
-import see.monkey as monkey
+import pexecenv.monkey as monkey
 open = monkey.monkey_open
 def raise_error(e): raise Exception(e)
 file = lambda *_: raise_error('Initialization of file objects is prohibited.')

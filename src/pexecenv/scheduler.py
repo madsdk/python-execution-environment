@@ -39,13 +39,15 @@ class Scheduler(object):
     
     PIPE_CHECK_INTERVAL = 0.01
 
-    def __init__(self, jailor, cores):
+    def __init__(self, jailor, cores, basedir):
         """
         Constructor.
         @type jailor: Jailor
         @param jailor: The Jailor instance controlling this scheduler.
         @type cores: int
         @param cores: The number of cores/CPUs to use.
+        @type basedir: str
+        @param basedir: The base directory where task code is stored.
         """
         super(Scheduler, self).__init__()
 
@@ -62,7 +64,7 @@ class Scheduler(object):
         self.__schedulers = []
         for i in range(0, cores):
             local_ipc, remote_ipc = EIPC.eipc_pair()
-            self.__schedulers.append((CoreScheduler(remote_ipc), local_ipc))
+            self.__schedulers.append((CoreScheduler(remote_ipc, basedir), local_ipc))
             local_ipc.register_function(self.corescheduler_callback, "callback")
             local_ipc.start()
             self.__schedulers[i][0].start()

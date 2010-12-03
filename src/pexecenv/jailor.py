@@ -59,7 +59,7 @@ class Jailor(EIPCProcess):
 
         # Create the scheduler and registry.
         self.registry = TaskRegistry(basedir)
-        self.scheduler = Scheduler(self, cores)
+        self.scheduler = Scheduler(self, cores, basedir)
 
         # Register functions for IPC.
         self.register_function(self.perform_task)
