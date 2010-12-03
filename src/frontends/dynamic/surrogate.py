@@ -1,0 +1,297 @@
+from __future__ import with_statement
+from eipc import EIPC
+from scrpc import SCRPC
+from threading import Condition, Thread
+from thread import allocate_lock
+from presence import Presence, PresenceService
+from pexecenv import Jailor
+from time import sleep, time
+# TODO: Why is the full path for Config needed here!?
+from frontends.daemonconfig import Config
+from datastore import RemoteDataStore, RemoteDataHandle
+from context import ContextMonitor
+import struct
+import logging
+
+class DynamicSurrogate(Thread):
+    CALLBACK_TIMEOUT = 5.0
+    MAINT_POLL = 1.0
+    
+    def __init__(self, debug_jail = False):
+        super(DynamicSurrogate, self).__init__()
+        
+        # Set member variables.
+        self.pending_services = {}
+        self.pending_services_lock = allocate_lock()
+        self.activity_count = 0
+        self.__shutdown = False
+        
+        # Get a config handle.
+        self._config = Config.get_instance()
+
+        # Get a logger.
+        self.__logger = logging.getLogger('scavenger')
+
+        # Start the execution environment.
+        self._ipc, remote_pipe = EIPC.eipc_pair()
+        self._ipc.start()
+        self.__exec_env = Jailor(remote_pipe, self._config.getint('cpu', 'cores'), debug=debug_jail)
+        self.__exec_env.start()
+
+        # Register the callback function.
+        self._ipc.register_function(self.task_callback)
+
+        # Create an RPC server that the clients can connect to.
+        try:
+            self.rpc_server = SCRPC()
+            scavenger_port = self.rpc_server.get_address()[1]
+            self.rpc_server.register_function(self.perform_service)
+            self.rpc_server.register_function(self.perform_service_intent)
+            self.rpc_server.register_function(self.install_service)
+            self.rpc_server.register_function(self.has_service)
+            self.rpc_server.register_function(self.ping)
+            self.__logger.info('DynamicSurrogate daemon is listening on port %i'%scavenger_port)
+        except Exception, e:
+            self.__logger.exception('Error creating RPC server.')
+            try:
+                self.__exec_env.shutdown()
+                if self.rpc_server: self.rpc_server.stop(True)
+            except: pass
+            raise e
+
+        # Announce the Scavenger service via Presence and start the context monitor.
+        try:
+            self.presence = Presence()
+            self.presence.connect()
+            # 2) Register the service.
+            service_data = struct.pack("!fIII", 
+                                       self._config.getfloat('cpu', 'strength'),
+                                       self._config.getint('cpu', 'cores'), 
+                                       0,
+                                       self._config.getint('network', 'speed'))
+            self.service = PresenceService('scavenger', scavenger_port, service_data)
+            self.presence.register_service(self.service)
+            self.context_monitor = ContextMonitor(self.presence)
+        except Exception, e:
+            try:
+                self.__exec_env.shutdown()
+                self.rpc_server.stop()
+                if self.presence: self.presence.shutdown()
+            except: pass
+            raise e
+
+        # Create a remote data store.
+        self.remotedatastore = RemoteDataStore(self.presence.get_node_name())
+        self.rpc_server.register_function(self.remotedatastore.fetch_data, 'resolve_data_handle')
+        self.rpc_server.register_function(self.remotedatastore.retain, 'retain_data_handle')
+        self.rpc_server.register_function(self.remotedatastore.expire, 'expire_data_handle')
+        self.rpc_server.register_function(self.remotedatastore.store_data, 'store_data')
+
+        # Start the maintenance thread.
+        self.start()
+     
+    def shutdown(self):
+        self.__shutdown = True
+        self.__exec_env.shutdown()
+        self.rpc_server.stop()
+        try: 
+            self.presence.remove_service('scavenger')
+        except: 
+            pass
+    
+    def ping(self, flaf):
+        """
+        Simple rpc function that can be used to check whether the connection is alive.
+        """
+        return flaf    
+
+    def task_callback(self, rcode, eid, output):
+        # Find the Condition object that the worker thread is waiting on.  
+        with self.pending_services_lock:
+            try:
+                cond = self.pending_services[eid]
+            except KeyError:
+                # The execution id was unknown. This means that the operation has timed out.
+                return
+            
+            # Store the return code and output for the caller to fetch.
+            self.pending_services[eid] = (rcode, output)
+                
+        # Now the return code and output has been placed so that the waiting
+        # thread can access it. Time to awaken the sleeper...
+        cond.acquire()
+        cond.notify()
+        cond.release()
+
+    def _resolve_data_handles_in_input(self, service_input):
+        if type(service_input) == dict:
+            # Keyword arguments.
+            for key, value in service_input.items():
+                if type(value) == RemoteDataHandle:
+                    service_input[key] = self.remotedatastore.resolve_data_handle(value, self.context_monitor._context)
+        elif type(service_input) in (tuple, list):
+            # Positional arguments.
+            new_list = []
+            for value in service_input:
+                if type(value) == RemoteDataHandle:
+                    new_list.append(self.remotedatastore.resolve_data_handle(value, self.context_monitor._context))
+                else:
+                    new_list.append(value)
+            service_input = new_list
+        else:
+            # Single argument.
+            if type(service_input) == RemoteDataHandle:
+                service_input = self.remotedatastore.resolve_data_handle(service_input, self.context_monitor._context)
+        return service_input
+
+    def change_activity(self, increment):
+        cpu_strength = self._config.getfloat('cpu', 'strength')
+        cpu_cores = self._config.getint('cpu', 'cores')
+        network_speed = self._config.getint('network', 'speed')
+
+        with self.pending_services_lock:
+            self.activity_count += increment
+            self.service.data = struct.pack("!fIII", 
+                                            cpu_strength,
+                                            cpu_cores,
+                                            self.activity_count,
+                                            network_speed)
+
+            self.presence.update_service(self.service)
+
+
+    def perform_service_intent(self, failure):
+        if failure:
+            # There was intent to call the function but it was never in fact called.
+            self.change_activity(-1)
+        else:
+            # Someone has shown intent of calling this funtion.
+            self.change_activity(1)
+        
+    def perform_service(self, service_name, service_input, timeout = 120, store = False, profile = False):
+        print 'perform %s'%service_name #DEBUG
+
+        # Check the service input for data handles that should be resolved.
+        service_input = self._resolve_data_handles_in_input(service_input)
+        
+        # Start performing the service.
+        with self.pending_services_lock:
+            if profile:
+                start = time()
+                start_activity = self.activity_count
+            try:
+                # Send the message to the execution env.
+                eid = self._ipc.perform_task(service_name, service_input)
+                # Create a Condition object that this worker thread can wait on until 
+                # the execution of the service is done.
+                cond = Condition()
+                cond.acquire()
+                # Update the pending services table.
+                self.pending_services[eid] = cond
+            except Exception, error:
+                err_msg = 'Error registering service with execution environment.'
+                raise Exception(err_msg, error)
+        
+        # Wait for the service to finish -- or for the timer to expire...
+        cond.wait(timeout)
+        if profile:
+            stop = time()
+            stop_activity = self.activity_count
+
+        # Check whether the result has been stored in pending_services.
+        # If not this means that the timeout was reached.
+        self.change_activity(-1)
+        with self.pending_services_lock:
+            try:
+                flaf = self.pending_services.pop(eid)
+            except KeyError, error:
+                del cond
+                err_msg = 'This should never happen ;-)'
+                raise Exception(err_msg, error)
+    
+        if type(flaf) == tuple:
+            # The result (or an error message is there).
+            cond.release()
+            del cond
+            rcode, output = flaf
+            if rcode == 'RESULT':
+                if store:
+                    # We have been asked to store the result here.
+                    if type(output) == tuple:
+                        # Store the output values as individual remote data handles. 
+                        new_output = []
+                        for item in output:
+                            new_output.append(self.remotedatastore.store_data(item))
+                        new_output = tuple(new_output)
+                    else:
+                        new_output = self.remotedatastore.store_data(output)
+
+                    if profile:
+                        cores = self._config.getint('cpu', 'cores')
+                        activity_level = float(start_activity/cores + stop_activity/cores) / 2
+                        if activity_level < 1: activity_level = 1.0
+                        complexity = ((stop - start) * self._config.getfloat('cpu', 'strength')) / activity_level
+                        return (new_output, complexity)
+                    else:
+                        return new_output
+                else:
+                    if profile:
+                        cores = self._config.getint('cpu', 'cores')
+                        activity_level = float(start_activity/cores + stop_activity/cores) / 2
+                        if activity_level < 1: activity_level = 1.0
+                        complexity = ((stop - start) * self._config.getfloat('cpu', 'strength')) / activity_level
+                        return (output, complexity)
+                    else:
+                        return output
+            elif rcode == 'ERROR':
+                err_msg = 'Exception thrown within service: %s'%output
+                raise Exception(err_msg)
+            else:
+                err_msg = 'Unknown return code: %s'%rcode
+                raise Exception(err_msg)        
+        else:
+            # The condition object is still there... a timeout must have occurred.
+            cond.release()
+            del cond
+            err_msg = 'Timeout while performing service.'
+            raise Exception(err_msg)
+
+    def install_service(self, service_name, service_code):
+        try:
+            self._ipc.install_task(service_name, service_code)
+        except Exception, error:
+            err_msg = 'Error installing service. %s'%error.message
+            raise Exception(err_msg, error)
+
+    def has_service(self, service_name):
+        try:
+            return self._ipc.task_exists(service_name)
+        except Exception, error:
+            raise Exception('Error checking for service. %s'%error.message, error)
+
+    def serve(self):
+        self.rpc_server.run()
+
+    def run(self):
+        # Thread body - this is used for any periodic maintenance etc.
+        cpu_strength = self._config.getfloat('cpu', 'strength')
+        cpu_cores = self._config.getint('cpu', 'cores')
+        network_speed = self._config.getint('network', 'speed')
+        period_count = 0
+        while not self.__shutdown:
+            # Update the Presence service every period.
+            with self.pending_services_lock:
+                self.service.data = struct.pack("!fIII", 
+                                                cpu_strength,
+                                                cpu_cores,
+                                                self.activity_count,
+                                                network_speed)
+                self.presence.update_service(self.service)
+            
+            # Cleanup the data store every 10th period.
+            if period_count % 10 == 0:
+                self.remotedatastore.cleanup()
+
+            # Wait for another second...
+            period_count += 1
+            sleep(DynamicSurrogate.MAINT_POLL)
