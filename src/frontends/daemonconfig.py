@@ -19,7 +19,7 @@ class Config(SafeConfigParser):
         if Config.INSTANCE != None:
             raise Exception('Singleton error: an instance of Config already exists.')
         
-        # Create the ~/.scavenger dir if it does not exist.
+        # Create the parent dir if it does not exist.
         if not os.path.exists(filename):
             dirname = os.path.dirname(filename) 
             if dirname != '':
