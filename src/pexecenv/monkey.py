@@ -12,7 +12,7 @@ def monkey_open(name, mode = 'r', buffering = -1):
     # Return the opened file object.
     return open(name, mode, buffering)
    
-# The standard header that can be prefixed onto untrusted service code.
+# The standard header that can be prefixed onto untrusted task code.
 monkey_header = """# ---MONKEY_START---
 import pexecenv.monkey as monkey
 open = monkey.monkey_open

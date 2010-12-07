@@ -21,8 +21,8 @@ class DynamicSurrogate(Thread):
         super(DynamicSurrogate, self).__init__()
         
         # Set member variables.
-        self.pending_services = {}
-        self.pending_services_lock = allocate_lock()
+        self.pending_tasks = {}
+        self.pending_tasks_lock = allocate_lock()
         self.activity_count = 0
         self.__shutdown = False
         
@@ -45,10 +45,10 @@ class DynamicSurrogate(Thread):
         try:
             self.rpc_server = SCRPC()
             scavenger_port = self.rpc_server.get_address()[1]
-            self.rpc_server.register_function(self.perform_service)
-            self.rpc_server.register_function(self.perform_service_intent)
-            self.rpc_server.register_function(self.install_service)
-            self.rpc_server.register_function(self.has_service)
+            self.rpc_server.register_function(self.perform_task)
+            self.rpc_server.register_function(self.perform_task_intent)
+            self.rpc_server.register_function(self.install_task)
+            self.rpc_server.register_function(self.has_task)
             self.rpc_server.register_function(self.ping)
             self.__logger.info('DynamicSurrogate daemon is listening on port %i'%scavenger_port)
         except Exception, e:
@@ -107,15 +107,15 @@ class DynamicSurrogate(Thread):
 
     def task_callback(self, rcode, eid, output):
         # Find the Condition object that the worker thread is waiting on.  
-        with self.pending_services_lock:
+        with self.pending_tasks_lock:
             try:
-                cond = self.pending_services[eid]
+                cond = self.pending_tasks[eid]
             except KeyError:
                 # The execution id was unknown. This means that the operation has timed out.
                 return
             
             # Store the return code and output for the caller to fetch.
-            self.pending_services[eid] = (rcode, output)
+            self.pending_tasks[eid] = (rcode, output)
                 
         # Now the return code and output has been placed so that the waiting
         # thread can access it. Time to awaken the sleeper...
@@ -123,33 +123,33 @@ class DynamicSurrogate(Thread):
         cond.notify()
         cond.release()
 
-    def _resolve_data_handles_in_input(self, service_input):
-        if type(service_input) == dict:
+    def _resolve_data_handles_in_input(self, task_input):
+        if type(task_input) == dict:
             # Keyword arguments.
-            for key, value in service_input.items():
+            for key, value in task_input.items():
                 if type(value) == RemoteDataHandle:
-                    service_input[key] = self.remotedatastore.resolve_data_handle(value, self.context_monitor._context)
-        elif type(service_input) in (tuple, list):
+                    task_input[key] = self.remotedatastore.resolve_data_handle(value, self.context_monitor._context)
+        elif type(task_input) in (tuple, list):
             # Positional arguments.
             new_list = []
-            for value in service_input:
+            for value in task_input:
                 if type(value) == RemoteDataHandle:
                     new_list.append(self.remotedatastore.resolve_data_handle(value, self.context_monitor._context))
                 else:
                     new_list.append(value)
-            service_input = new_list
+            task_input = new_list
         else:
             # Single argument.
-            if type(service_input) == RemoteDataHandle:
-                service_input = self.remotedatastore.resolve_data_handle(service_input, self.context_monitor._context)
-        return service_input
+            if type(task_input) == RemoteDataHandle:
+                task_input = self.remotedatastore.resolve_data_handle(task_input, self.context_monitor._context)
+        return task_input
 
     def change_activity(self, increment):
         cpu_strength = self._config.getfloat('cpu', 'strength')
         cpu_cores = self._config.getint('cpu', 'cores')
         network_speed = self._config.getint('network', 'speed')
 
-        with self.pending_services_lock:
+        with self.pending_tasks_lock:
             self.activity_count += increment
             self.service.data = struct.pack("!fIII", 
                                             cpu_strength,
@@ -160,7 +160,7 @@ class DynamicSurrogate(Thread):
             self.presence.update_service(self.service)
 
 
-    def perform_service_intent(self, failure):
+    def perform_task_intent(self, failure):
         if failure:
             # There was intent to call the function but it was never in fact called.
             self.change_activity(-1)
@@ -168,42 +168,42 @@ class DynamicSurrogate(Thread):
             # Someone has shown intent of calling this funtion.
             self.change_activity(1)
         
-    def perform_service(self, service_name, service_input, timeout = 120, store = False, profile = False):
-        print 'perform %s'%service_name #DEBUG
+    def perform_task(self, task_name, task_input, timeout = 120, store = False, profile = False):
+        print 'perform %s'%task_name #DEBUG
 
-        # Check the service input for data handles that should be resolved.
-        service_input = self._resolve_data_handles_in_input(service_input)
+        # Check the task input for data handles that should be resolved.
+        task_input = self._resolve_data_handles_in_input(task_input)
         
-        # Start performing the service.
-        with self.pending_services_lock:
+        # Start performing the task.
+        with self.pending_tasks_lock:
             if profile:
                 start = time()
                 start_activity = self.activity_count
             try:
                 # Send the message to the execution env.
-                eid = self._ipc.perform_task(service_name, service_input)
+                eid = self._ipc.perform_task(task_name, task_input)
                 # Create a Condition object that this worker thread can wait on until 
-                # the execution of the service is done.
+                # the execution of the task is done.
                 cond = Condition()
                 cond.acquire()
-                # Update the pending services table.
-                self.pending_services[eid] = cond
+                # Update the pending tasks table.
+                self.pending_tasks[eid] = cond
             except Exception, error:
-                err_msg = 'Error registering service with execution environment.'
+                err_msg = 'Error registering task with execution environment.'
                 raise Exception(err_msg, error)
         
-        # Wait for the service to finish -- or for the timer to expire...
+        # Wait for the task to finish -- or for the timer to expire...
         cond.wait(timeout)
         if profile:
             stop = time()
             stop_activity = self.activity_count
 
-        # Check whether the result has been stored in pending_services.
+        # Check whether the result has been stored in pending_tasks.
         # If not this means that the timeout was reached.
         self.change_activity(-1)
-        with self.pending_services_lock:
+        with self.pending_tasks_lock:
             try:
-                flaf = self.pending_services.pop(eid)
+                flaf = self.pending_tasks.pop(eid)
             except KeyError, error:
                 del cond
                 err_msg = 'This should never happen ;-)'
@@ -244,7 +244,7 @@ class DynamicSurrogate(Thread):
                     else:
                         return output
             elif rcode == 'ERROR':
-                err_msg = 'Exception thrown within service: %s'%output
+                err_msg = 'Exception thrown within task: %s'%output
                 raise Exception(err_msg)
             else:
                 err_msg = 'Unknown return code: %s'%rcode
@@ -253,21 +253,21 @@ class DynamicSurrogate(Thread):
             # The condition object is still there... a timeout must have occurred.
             cond.release()
             del cond
-            err_msg = 'Timeout while performing service.'
+            err_msg = 'Timeout while performing task.'
             raise Exception(err_msg)
 
-    def install_service(self, service_name, service_code):
+    def install_task(self, task_name, task_code):
         try:
-            self._ipc.install_task(service_name, service_code)
+            self._ipc.install_task(task_name, task_code)
         except Exception, error:
-            err_msg = 'Error installing service. %s'%error.message
+            err_msg = 'Error installing task. %s'%error.message
             raise Exception(err_msg, error)
 
-    def has_service(self, service_name):
+    def has_task(self, task_name):
         try:
-            return self._ipc.task_exists(service_name)
+            return self._ipc.task_exists(task_name)
         except Exception, error:
-            raise Exception('Error checking for service. %s'%error.message, error)
+            raise Exception('Error checking for task. %s'%error.message, error)
 
     def serve(self):
         self.rpc_server.run()
@@ -280,7 +280,7 @@ class DynamicSurrogate(Thread):
         period_count = 0
         while not self.__shutdown:
             # Update the Presence service every period.
-            with self.pending_services_lock:
+            with self.pending_tasks_lock:
                 self.service.data = struct.pack("!fIII", 
                                                 cpu_strength,
                                                 cpu_cores,
