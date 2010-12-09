@@ -60,7 +60,8 @@ def main():
 
     try:               
         # Serve the RPC thingy...
-        print 'Scavenger daemon started (using %i cores)'%config.getint('cpu', 'cores')
+        cores = config.getint('cpu', 'cores')
+        print 'Scavenger daemon started (using %i core%s)'%(cores, "" if cores == 1 else "s")
         scavenger.serve()
     except KeyboardInterrupt:
         print 'Interrupted by user.'
