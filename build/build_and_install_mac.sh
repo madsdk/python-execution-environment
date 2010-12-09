@@ -48,6 +48,7 @@ cp -r scavenger_daemon-1.0 $PREFIX/scavenger_daemon
 echo "#!/bin/sh" > $PREFIX/scavenger_daemon/start_daemon.sh
 echo "PYTHON=\"$PREFIX/bin/python\"" >> $PREFIX/scavenger_daemon/start_daemon.sh
 cat start_daemon.sh >> $PREFIX/scavenger_daemon/start_daemon.sh 
+chmod +x $PREFIX/scavenger_daemon/start_daemon.sh
 cd ../..
 
 # SCRPC.
