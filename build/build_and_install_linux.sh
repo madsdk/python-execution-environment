@@ -44,6 +44,9 @@ fi
 
 cd $x/build;
 ./build.sh 1.0
+if [ -d $PREFIX/scavenger_daemon ]; then 
+	rm -rf $PREFIX/scavenger_daemon
+fi
 cp -r scavenger_daemon-1.0 $PREFIX/scavenger_daemon
 echo "#!/bin/sh" > $PREFIX/scavenger_daemon/start_daemon.sh
 echo "PYTHON=\"$PREFIX/bin/python\"" >> $PREFIX/scavenger_daemon/start_daemon.sh
