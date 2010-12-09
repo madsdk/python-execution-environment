@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Constants.
 STACKLESS="http://www.stackless.com/binaries/stackless-27-export.tar.bz2"
