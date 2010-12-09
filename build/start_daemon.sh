@@ -15,7 +15,7 @@ else
 	echo "Usage: $0 [static|dynamic]";
 	killall -9 presence;
 	exit 1
-fi
+fi; fi; fi
 
 # Shut down Presence.
 killall -9 presence
