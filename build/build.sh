@@ -23,7 +23,7 @@ find $BUILDDIR -name ".git" | xargs rm -rf
 find $BUILDDIR -name ".gitignore" | xargs rm 
 find $BUILDDIR -name ".pyc" | xargs rm
 rm -rf $BUILDDIR/datastore/*
-rm $BUILDDIR/scavenger.ini 
+rm -f $BUILDDIR/scavenger.ini 
 rm -rf $BUILDDIR/pexecenv/tasks
 
 # Create the archive.
