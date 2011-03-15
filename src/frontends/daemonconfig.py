@@ -50,7 +50,7 @@ class Config(SafeConfigParser):
         self._dirty = True
         return SafeConfigParser.set(self, section, option, value)
 
-    # These media speeds are teoretical speed in bytes/sec * 0.75. 
+    # These media speeds are theoretical speeds in bytes/second * 0.75. 
     # For the wireless media types this is divided by two, which seems
     # to be the actual transfer speeds obtained using these media.
     MEDIA = {
