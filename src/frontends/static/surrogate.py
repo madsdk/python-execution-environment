@@ -104,20 +104,20 @@ class StaticSurrogate(Thread):
             # Keyword arguments.
             for key, value in task_input.items():
                 if type(value) == RemoteDataHandle:
-                    task_input[key] = self.remotedatastore.resolve_data_handle(value, self.context_monitor._context)
+                    task_input[key] = self.remotedatastore.resolve_data_handle(value)
         elif type(task_input) in (tuple, list):
             # Positional arguments.
             new_list = []
             for value in task_input:
                 if type(value) == RemoteDataHandle:
-                    new_list.append(self.remotedatastore.resolve_data_handle(value, self.context_monitor._context))
+                    new_list.append(self.remotedatastore.resolve_data_handle(value))
                 else:
                     new_list.append(value)
             task_input = new_list
         else:
             # Single argument.
             if type(task_input) == RemoteDataHandle:
-                task_input = self.remotedatastore.resolve_data_handle(task_input, self.context_monitor._context)
+                task_input = self.remotedatastore.resolve_data_handle(task_input)
         return task_input
 
     def change_activity(self, increment):
