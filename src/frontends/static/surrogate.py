@@ -23,11 +23,15 @@ class StaticSurrogate(Thread):
         self.activity_count = 0
         self.__shutdown = False
         
-        # Get a config handle.
-        self._config = Config.get_instance()
-
         # Get a logger.
         self.__logger = logging.getLogger('scavenger')
+
+        # Get a config handle.
+        self._config = Config.get_instance()
+        # Check that the "static" section contains a node name.
+        if not self._config.has_section('static') or not self._config.has_option('static', 'name'):
+            self.__logger.error("Static surrogate name is missing in the config file.")
+            raise Exception("Static surrogate name is missing in the config file.")
 
         # Start the execution environment.
         self._ipc, remote_pipe = EIPC.eipc_pair()
@@ -47,7 +51,7 @@ class StaticSurrogate(Thread):
             self.rpc_server.register_function(self.install_task)
             self.rpc_server.register_function(self.has_task)
             self.rpc_server.register_function(self.ping)
-            self.__logger.info('DynamicSurrogate daemon is listening on port %i'%scavenger_port)
+            self.__logger.info('StaticSurrogate daemon is listening on port %i'%scavenger_port)
         except Exception, e:
             self.__logger.exception('Error creating RPC server.')
             try:
@@ -57,7 +61,7 @@ class StaticSurrogate(Thread):
             raise e
 
         # Create a remote data store.
-        self.remotedatastore = RemoteDataStore(self.presence.get_node_name())
+        self.remotedatastore = RemoteDataStore(self._config.get('static', 'name'))
         self.rpc_server.register_function(self.remotedatastore.fetch_data, 'resolve_data_handle')
         self.rpc_server.register_function(self.remotedatastore.retain, 'retain_data_handle')
         self.rpc_server.register_function(self.remotedatastore.expire, 'expire_data_handle')

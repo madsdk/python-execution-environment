@@ -19,6 +19,7 @@ This executable script starts the Scavenger daemon.
 
 import sys
 from frontends.dynamic import DynamicSurrogate
+from frontends.static import StaticSurrogate
 from frontends import Config
 import logging
 
@@ -53,7 +54,10 @@ def main():
         
     # Create a Scavenger instance.
     try:
-        scavenger = DynamicSurrogate(debug_jail=debug)
+        if '-s' in sys.argv:
+            scavenger = StaticSurrogate(debug_jail=debug)
+        else:
+            scavenger = DynamicSurrogate(debug_jail=debug)
     except:
         logger.exception('Error creating Scavenger instance.')
         sys.exit(1)
