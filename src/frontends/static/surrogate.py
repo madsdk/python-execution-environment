@@ -61,7 +61,11 @@ class StaticSurrogate(Thread):
             raise e
 
         # Create a remote data store.
-        self.remotedatastore = RemoteDataStore(self._config.get('static', 'name'))
+        address = self._config.get('static', 'name')
+        address = address.split(', ')
+        address[1] = int(address[1])
+        address = tuple(address)
+        self.remotedatastore = RemoteDataStore(address)
         self.rpc_server.register_function(self.remotedatastore.fetch_data, 'resolve_data_handle')
         self.rpc_server.register_function(self.remotedatastore.retain, 'retain_data_handle')
         self.rpc_server.register_function(self.remotedatastore.expire, 'expire_data_handle')
